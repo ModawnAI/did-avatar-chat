@@ -13,7 +13,7 @@ export async function GET() {
     // Check cache
     if (cachedVideo && Date.now() - cacheTimestamp < CACHE_DURATION) {
       console.log('[idle-video API] Serving from cache, size:', cachedVideo.data.length, 'bytes');
-      return new NextResponse(cachedVideo.data, {
+      return new NextResponse(new Uint8Array(cachedVideo.data), {
         headers: {
           'Content-Type': cachedVideo.contentType,
           'Cache-Control': 'public, max-age=3600',
@@ -73,7 +73,7 @@ export async function GET() {
     cachedVideo = { data: buffer, contentType, url: idleVideoUrl };
     cacheTimestamp = Date.now();
 
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type': contentType,
         'Cache-Control': 'public, max-age=3600',

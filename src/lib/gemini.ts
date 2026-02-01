@@ -32,9 +32,6 @@ const SYSTEM_PROMPT = `당신은 청기운입니다. 동양 철학과 운명학�
 const MODEL = 'gemini-3-flash-preview';
 
 const CONFIG = {
-  thinkingConfig: {
-    thinkingLevel: 'HIGH' as const,
-  },
   tools: [
     {
       googleSearch: {},

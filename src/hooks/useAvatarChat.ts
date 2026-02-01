@@ -56,7 +56,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
         const res = await fetch('/api/did/agent');
         if (res.ok) {
           const data = await res.json();
-          console.log('[Agent] Info fetched:', data);
           setAgentInfo(data);
         } else {
           const fallbackIdleVideo = process.env.NEXT_PUBLIC_DID_IDLE_VIDEO;
@@ -90,7 +89,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
         const formData = new FormData();
         formData.append('audio', audioBlob, 'recording.webm');
 
-        console.log('[Recording] Sending audio to STT...');
         const sttRes = await fetch('/api/stt', {
           method: 'POST',
           body: formData,
@@ -101,10 +99,8 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
         }
 
         const { text } = await sttRes.json();
-        console.log('[Recording] Transcription:', text);
 
         if (!text || !text.trim()) {
-          console.log('[Recording] Empty transcription');
           setState('ready');
           isProcessingRef.current = false;
           return;
@@ -120,7 +116,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
         setMessages((prev) => [...prev, userMessage]);
 
         // Get LLM response
-        console.log('[Recording] Getting LLM response...');
         const chatRes = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -166,7 +161,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
           }
         }
 
-        console.log('[Recording] LLM response:', fullResponse);
 
         // Add assistant message
         const assistantMessage: Message = {
@@ -178,7 +172,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
         setMessages((prev) => [...prev, assistantMessage]);
 
         // Send to D-ID for avatar speech
-        console.log('[Recording] Sending to D-ID speak...');
         const speakRes = await fetch('/api/did/speak', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -195,7 +188,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
           setState('ready');
           isProcessingRef.current = false;
         } else {
-          console.log('[Recording] Speak API success, waiting for stream/started');
           // State will be updated by data channel messages
           // Set a timeout fallback in case data channel messages don't arrive
           setTimeout(() => {
@@ -243,7 +235,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
       mediaRecorder.start();
       setIsRecording(true);
       setState('listening');
-      console.log('[Recording] Started');
     } catch (err) {
       console.error('[Recording] Failed to start:', err);
       setError('Failed to access microphone');
@@ -256,14 +247,17 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
 
     mediaRecorderRef.current.stop();
     setIsRecording(false);
-    console.log('[Recording] Stopped');
   }, [isRecording]);
 
-  // Cleanup function
+  // Cleanup function - use refs to avoid dependency issues
   const cleanup = useCallback(async () => {
-    // Stop recording if active
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+    // Stop recording if active (check ref state, not React state)
+    if (mediaRecorderRef.current) {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {
+        // Ignore if already stopped
+      }
     }
     mediaRecorderRef.current = null;
 
@@ -301,8 +295,9 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
     streamDataRef.current = null;
     webrtcStreamRef.current = null;
     setIsConnected(false);
+    setIsRecording(false);
     setState('idle');
-  }, [isRecording]);
+  }, []);
 
   // Connect to D-ID stream
   const connect = useCallback(async () => {
@@ -319,7 +314,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
       }
 
       const { streamId, sessionId, offer, iceServers } = streamData;
-      console.log('[D-ID] Stream created:', { streamId, sessionId });
 
       if (!offer || !offer.sdp) {
         throw new Error('Invalid SDP offer from D-ID');
@@ -334,10 +328,8 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
       // Create data channel (D-ID expects us to create it)
       const dc = pc.createDataChannel('JanusDataChannel');
       dataChannelRef.current = dc;
-      console.log('[WebRTC] Created data channel:', dc.label);
 
       dc.onopen = () => {
-        console.log('[WebRTC] Data channel opened');
       };
 
       dc.onerror = (err) => {
@@ -345,26 +337,21 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
       };
 
       dc.onclose = () => {
-        console.log('[WebRTC] Data channel closed');
       };
 
       dc.onmessage = (msgEvent) => {
         const msg = msgEvent.data;
-        console.log('[WebRTC] ==== Data channel message ====');
-        console.log('[WebRTC] Raw message:', msg);
 
         // Data channel is working - use it as primary state control
         dataChannelActiveRef.current = true;
 
         if (msg.includes('stream/ready')) {
-          console.log('[D-ID] Stream ready - setting state to ready');
           setState('ready');
           setIsConnected(true);
           isSpeakingRef.current = false;
           setIsSpeaking(false);
           isProcessingRef.current = false;
         } else if (msg.includes('stream/started')) {
-          console.log('[D-ID] Stream started - waiting for video frames before crossfade');
           setState('speaking');
           if (videoRef.current) {
             videoRef.current.play().catch((err) => {
@@ -381,7 +368,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
 
             // Check if video has full-size content (not placeholder 150x150)
             if (width > 200 && height > 200) {
-              console.log('[D-ID] Video has content, starting crossfade:', width, 'x', height);
               isSpeakingRef.current = true;
               setIsSpeaking(true);
               setIsVideoPlaying(true);
@@ -394,13 +380,11 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
           };
           requestAnimationFrame(waitForVideoContent);
         } else if (msg.includes('stream/done')) {
-          console.log('[D-ID] Stream done - setting state to ready');
           isSpeakingRef.current = false;
           setIsSpeaking(false);
           setIsVideoPlaying(false);
           setState('ready');
           isProcessingRef.current = false;
-          console.log('[D-ID] Input should now be enabled');
         }
       };
 
@@ -430,15 +414,12 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
 
       // Handle incoming tracks
       pc.ontrack = (event) => {
-        console.log('[WebRTC] Track received:', event.track.kind, 'readyState:', event.track.readyState);
         if (event.streams[0]) {
           webrtcStreamRef.current = event.streams[0];
-          console.log('[WebRTC] Stream has', event.streams[0].getVideoTracks().length, 'video tracks');
 
           // Monitor video track for dimension changes (indicates speaking start/stop)
           const videoTrack = event.streams[0].getVideoTracks()[0];
           if (videoTrack) {
-            console.log('[WebRTC] Video track settings:', videoTrack.getSettings());
 
             // Track previous dimensions to detect changes (fallback when data channel not working)
             let lastWidth = 0;
@@ -457,7 +438,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
 
                 // Only log when dimensions change
                 if (width !== lastWidth || height !== lastHeight) {
-                  console.log('[Video] Dimensions changed:', lastWidth, 'x', lastHeight, '->', width, 'x', height);
                   lastWidth = width;
                   lastHeight = height;
                 }
@@ -466,7 +446,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
                 // Full video dimensions when speaking (typically 512x512 or larger)
                 if (width > 200 && height > 200) {
                   if (!isSpeakingRef.current) {
-                    console.log('[Video Fallback] Speaking started - dimensions:', width, 'x', height);
                     isSpeakingRef.current = true;
                     speakingStartTime = Date.now();
                     setIsSpeaking(true);
@@ -477,7 +456,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
                   // Video went back to small or stopped - speaking ended
                   const speakingDuration = Date.now() - speakingStartTime;
                   if (speakingDuration > 500) {
-                    console.log('[Video Fallback] Speaking ended - dimensions:', width, 'x', height, 'duration:', speakingDuration, 'ms');
                     isSpeakingRef.current = false;
                     setIsSpeaking(false);
                     setState('ready');
@@ -499,21 +477,17 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
             videoRef.current.srcObject = event.streams[0];
 
             videoRef.current.onloadedmetadata = () => {
-              console.log('[Video] Metadata loaded, dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
             };
 
             videoRef.current.onplaying = () => {
-              console.log('[Video] Playing started, dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
               setIsVideoPlaying(true);
             };
 
             // Listen for resize events (video dimension changes)
             videoRef.current.onresize = () => {
-              console.log('[Video] Resize event - new dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
             };
 
             videoRef.current.play().catch((err) => {
-              console.log('[Video] Initial autoplay blocked:', err.message);
             });
           }
         }
@@ -521,12 +495,10 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
 
       // Also handle data channel from remote (fallback)
       pc.ondatachannel = (event) => {
-        console.log('[WebRTC] Received data channel from remote:', event.channel.label);
         const remoteDc = event.channel;
 
         remoteDc.onmessage = (msgEvent) => {
           const msg = msgEvent.data;
-          console.log('[WebRTC] Remote data channel message:', msg);
 
           if (msg.includes('stream/ready')) {
             setState('ready');
@@ -551,7 +523,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
 
       // Handle connection state
       pc.onconnectionstatechange = () => {
-        console.log('[WebRTC] Connection state:', pc.connectionState);
         if (pc.connectionState === 'connected') {
           setState('ready');
           setIsConnected(true);
@@ -583,7 +554,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
         throw new Error('SDP exchange failed');
       }
 
-      console.log('[D-ID] SDP answer sent');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Connection failed';
       console.error('[D-ID] Connection error:', err);
@@ -597,19 +567,10 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
   // Send text message
   const sendMessage = useCallback(
     async (text: string) => {
-      console.log('[sendMessage] Called with:', {
-        text: text.substring(0, 50),
-        hasStreamData: !!streamDataRef.current,
-        isConnected,
-        isProcessing: isProcessingRef.current,
-      });
-
       if (!streamDataRef.current || !isConnected || isProcessingRef.current) {
-        console.log('[sendMessage] Blocked - conditions not met');
         return;
       }
 
-      console.log('[sendMessage] Starting message processing');
       isProcessingRef.current = true;
 
       try {
@@ -674,7 +635,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
         setMessages((prev) => [...prev, assistantMessage]);
 
         // Send to D-ID
-        console.log('[sendMessage] Sending to D-ID speak...');
         const speakRes = await fetch('/api/did/speak', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -691,7 +651,6 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
           setState('ready');
           isProcessingRef.current = false;
         } else {
-          console.log('[sendMessage] Speak API success, waiting for stream/started');
           // Timeout fallback
           setTimeout(() => {
             if (isProcessingRef.current) {
@@ -717,12 +676,13 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
     cleanup();
   }, [cleanup]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount only
   useEffect(() => {
     return () => {
       cleanup();
     };
-  }, [cleanup]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return {
     // State

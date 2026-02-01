@@ -3,11 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Microphone,
+  MicrophoneSlash,
   PaperPlaneTilt,
   Phone,
   PhoneDisconnect,
   Spinner,
-  ChatCircle,
   Warning,
 } from '@phosphor-icons/react';
 import { useAvatarChat } from '@/hooks/useAvatarChat';
@@ -40,7 +40,6 @@ const stateColors: Record<AvatarState, string> = {
 
 export function AvatarChat({ voiceId, systemPrompt }: AvatarChatProps) {
   const [inputText, setInputText] = useState('');
-  const [inputMode, setInputMode] = useState<'voice' | 'text'>('voice');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -52,7 +51,6 @@ export function AvatarChat({ voiceId, systemPrompt }: AvatarChatProps) {
     idleVideoRef,
     isRecording,
     isSpeaking,
-    isVideoPlaying,
     agentInfo,
     connect,
     disconnect,
@@ -83,292 +81,208 @@ export function AvatarChat({ voiceId, systemPrompt }: AvatarChatProps) {
 
   const isProcessing = state === 'processing' || state === 'speaking';
   const isListening = state === 'listening';
+  const canInteract = isConnected && !isProcessing;
+  const canRecord = isConnected && !isProcessing; // Can start recording (separate from canInteract)
 
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
-      {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
-        <div className="flex items-center gap-3">
-          <ChatCircle size={28} weight="fill" className="text-cyan-400" />
-          <h1 className="text-xl font-semibold text-white">D-ID 아바타 채팅</h1>
-        </div>
+    <div className="relative h-screen w-screen overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      {/* Full screen video background */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        {/* Idle video - always visible underneath */}
+        {agentInfo?.idleVideo && (
+          <video
+            ref={idleVideoRef}
+            src={agentInfo.idleVideo}
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="absolute w-full h-full object-contain"
+            style={{ zIndex: 10 }}
+          />
+        )}
 
-        <div className="flex items-center gap-4">
-          {/* Status indicator */}
-          <div className="flex items-center gap-2">
+        {/* WebRTC stream - fades in/out on top */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={false}
+          className="absolute w-full h-full object-contain transition-opacity duration-200 ease-out"
+          style={{
+            zIndex: 20,
+            opacity: isSpeaking ? 1 : 0,
+          }}
+        />
+
+        {/* Gradient overlay for better text readability */}
+        <div
+          className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/20"
+          style={{ zIndex: 25 }}
+        />
+      </div>
+
+      {/* Overlay when not connected */}
+      {state === 'idle' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 z-30">
+          <Phone size={64} weight="light" className="text-gray-400 mb-4" />
+          <p className="text-gray-400 text-lg mb-6">연결 버튼을 클릭하세요</p>
+          <button
+            onClick={connect}
+            className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-full transition-colors text-lg"
+          >
+            <Phone size={24} weight="bold" />
+            <span>연결하기</span>
+          </button>
+        </div>
+      )}
+
+      {/* Connecting overlay */}
+      {state === 'connecting' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 z-30">
+          <Spinner size={64} className="animate-spin text-cyan-400 mb-4" />
+          <p className="text-gray-300 text-lg">연결 중...</p>
+        </div>
+      )}
+
+      {/* Header - minimal, floating */}
+      <header className="absolute top-0 left-0 right-0 z-40 p-4">
+        <div className="flex items-center justify-between">
+          {/* Status */}
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-black/50 backdrop-blur-sm rounded-full">
             <div
-              className={`w-2.5 h-2.5 rounded-full ${stateColors[state]} ${
+              className={`w-2 h-2 rounded-full ${stateColors[state]} ${
                 state === 'listening' || state === 'speaking' ? 'animate-pulse' : ''
               }`}
             />
-            <span className="text-sm text-gray-400">{stateLabels[state]}</span>
+            <span className="text-sm text-white/80">{stateLabels[state]}</span>
           </div>
 
-          {/* Connect/Disconnect button */}
-          {isConnected ? (
+          {/* Disconnect button */}
+          {isConnected && (
             <button
               onClick={disconnect}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 bg-red-600/80 hover:bg-red-600 backdrop-blur-sm text-white rounded-full transition-colors text-sm"
             >
-              <PhoneDisconnect size={20} weight="bold" />
-              <span>연결 해제</span>
-            </button>
-          ) : (
-            <button
-              onClick={connect}
-              disabled={state === 'connecting'}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg transition-colors"
-            >
-              {state === 'connecting' ? (
-                <Spinner size={20} className="animate-spin" />
-              ) : (
-                <Phone size={20} weight="bold" />
-              )}
-              <span>{state === 'connecting' ? '연결 중...' : '연결'}</span>
+              <PhoneDisconnect size={18} weight="bold" />
+              <span>종료</span>
             </button>
           )}
         </div>
       </header>
 
-      {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Avatar section - takes most of the screen */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
-          <div className="relative w-full h-full max-h-[80vh] bg-black rounded-2xl overflow-hidden shadow-2xl aspect-video">
-            {/*
-              Two-layer video system:
-              - Idle video: Always visible as background (z-10)
-              - WebRTC video: On top when speaking (z-20), hidden otherwise
-            */}
 
-            {/* Idle video - stays slightly visible during speaking for smooth transition back */}
-            {agentInfo?.idleVideo && (
-              <video
-                ref={idleVideoRef}
-                src={agentInfo.idleVideo}
-                autoPlay
-                loop
-                muted
-                playsInline
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'contain',
-                  zIndex: 10,
-                  opacity: 1, // Always visible
-                }}
-              />
-            )}
-
-            {/* WebRTC stream - fades in/out on top of idle */}
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted={false}
-              style={{
-                position: 'absolute',
-                inset: 0,
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-                zIndex: 20,
-                opacity: isSpeaking ? 1 : 0,
-                transition: 'opacity 200ms ease-out',
-              }}
-            />
-
-            {/* Overlay when idle (not connected) */}
-            {state === 'idle' && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/80 text-gray-400">
-                <Phone size={48} weight="light" className="mb-3" />
-                <p className="text-sm">연결 버튼을 클릭하세요</p>
-              </div>
-            )}
-
-            {/* Connecting overlay */}
-            {state === 'connecting' && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/60 text-gray-300">
-                <Spinner size={48} className="animate-spin mb-3" />
-                <p className="text-sm">연결 중...</p>
-              </div>
-            )}
-
-            {/* Listening indicator */}
-            {isListening && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 bg-blue-500/90 text-white text-sm rounded-full">
-                <div className="flex gap-1">
-                  <span className="w-1.5 h-4 bg-white rounded-full animate-pulse" />
-                  <span className="w-1.5 h-4 bg-white rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-4 bg-white rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
-                </div>
-                <span>듣는 중</span>
-              </div>
-            )}
-
-            {/* Speaking indicator */}
-            {state === 'speaking' && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 bg-cyan-500/90 text-white text-sm rounded-full">
-                <div className="flex gap-1">
-                  <span className="w-1 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-                <span>말하는 중</span>
-              </div>
-            )}
-
-            {/* Processing indicator */}
-            {state === 'processing' && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 bg-purple-500/90 text-white text-sm rounded-full">
-                <Spinner size={16} className="animate-spin" />
-                <span>생각 중</span>
-              </div>
-            )}
-
-            {/* Debug info - remove in production */}
-            <div className="absolute top-2 left-2 text-xs text-white bg-black/50 px-2 py-1 rounded z-50">
-              state: {state} | speaking: {isSpeaking ? 'Y' : 'N'} | videoPlaying: {isVideoPlaying ? 'Y' : 'N'}
-            </div>
-          </div>
-
-          {/* Voice controls */}
-          <div className="mt-6 flex items-center gap-4">
-            {/* Input mode toggle */}
-            <div className="flex items-center gap-2 p-1 bg-gray-800 rounded-lg">
-              <button
-                onClick={() => setInputMode('voice')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  inputMode === 'voice'
-                    ? 'bg-cyan-600 text-white'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                음성
-              </button>
-              <button
-                onClick={() => setInputMode('text')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  inputMode === 'text'
-                    ? 'bg-cyan-600 text-white'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                텍스트
-              </button>
-            </div>
-
-            {/* Record button (only in voice mode) - press and hold */}
-            {inputMode === 'voice' && isConnected && (
-              <button
-                onMouseDown={startRecording}
-                onMouseUp={stopRecording}
-                onMouseLeave={stopRecording}
-                onTouchStart={startRecording}
-                onTouchEnd={stopRecording}
-                disabled={state === 'processing' || state === 'speaking'}
-                className={`p-4 rounded-full transition-all ${
-                  isRecording
-                    ? 'bg-red-600 scale-110 animate-pulse'
-                    : 'bg-cyan-600 hover:bg-cyan-700'
-                } text-white disabled:opacity-50 disabled:cursor-not-allowed`}
-                title="길게 눌러서 녹음"
-              >
-                <Microphone size={28} weight="bold" />
-              </button>
-            )}
-          </div>
-
-          {/* Voice mode info */}
-          {inputMode === 'voice' && isConnected && (
-            <p className="mt-3 text-sm text-gray-500">
-              {isRecording ? '녹음 중... 버튼에서 손을 떼면 전송됩니다' : '버튼을 길게 눌러서 말하세요'}
-            </p>
-          )}
-        </div>
-
-        {/* Chat section - narrow sidebar */}
-        <div className="w-80 flex flex-col border-l border-gray-700">
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {messages.length === 0 && isConnected && (
-              <div className="text-center text-gray-500 mt-8">
-                <p>{inputMode === 'voice' ? '말씀해 보세요' : '메시지를 입력하세요'}</p>
-              </div>
-            )}
-
-            {messages.map((message) => (
+      {/* Chat messages - floating panel */}
+      {messages.length > 0 && (
+        <div className="absolute bottom-24 left-4 right-4 max-h-[40vh] z-30 overflow-hidden">
+          <div className="flex flex-col gap-2 overflow-y-auto max-h-full px-2 py-2">
+            {messages.slice(-5).map((message) => (
               <div
                 key={message.id}
                 className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[80%] px-4 py-3 rounded-2xl ${
+                  className={`max-w-[70%] px-4 py-2 rounded-2xl backdrop-blur-sm ${
                     message.role === 'user'
-                      ? 'bg-cyan-600 text-white rounded-br-sm'
-                      : 'bg-gray-700 text-gray-100 rounded-bl-sm'
+                      ? 'bg-cyan-600/80 text-white rounded-br-sm'
+                      : 'bg-black/50 text-white rounded-bl-sm'
                   }`}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                  <p className="text-sm">{message.content}</p>
                 </div>
               </div>
             ))}
-
-            {/* Processing indicator in chat */}
-            {isProcessing && (
-              <div className="flex justify-start">
-                <div className="bg-gray-700 text-gray-300 px-4 py-3 rounded-2xl rounded-bl-sm">
-                  <div className="flex items-center gap-2">
-                    <Spinner size={16} className="animate-spin" />
-                    <span className="text-sm">
-                      {state === 'processing' ? '생각 중...' : '말하는 중...'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div ref={messagesEndRef} />
           </div>
+        </div>
+      )}
 
-          {/* Error message */}
-          {error && (
-            <div className="mx-6 mb-4 flex items-center gap-2 px-4 py-2 bg-red-900/50 border border-red-700 text-red-300 rounded-lg">
-              <Warning size={18} />
-              <span className="text-sm">{error}</span>
-              <button onClick={clearError} className="ml-auto text-red-400 hover:text-red-200">
-                &times;
-              </button>
-            </div>
-          )}
+      {/* Error message */}
+      {error && (
+        <div className="absolute top-20 left-4 right-4 z-40">
+          <div className="flex items-center gap-2 px-4 py-2 bg-red-900/80 backdrop-blur-sm border border-red-700 text-red-200 rounded-lg">
+            <Warning size={18} />
+            <span className="text-sm flex-1">{error}</span>
+            <button onClick={clearError} className="text-red-300 hover:text-white">
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
 
-          {/* Text input area (only in text mode) */}
-          {inputMode === 'text' && (
-            <div className="p-6 border-t border-gray-700">
-              <div className="flex items-center gap-3">
+      {/* Input area - fixed at bottom */}
+      {isConnected && (
+        <div className="absolute bottom-0 left-0 right-0 z-40 p-4">
+          <div className="flex items-center gap-3 max-w-2xl mx-auto">
+            {/* Voice record button - tap to toggle */}
+            <button
+              type="button"
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                try {
+                  if (isRecording) {
+                    stopRecording();
+                  } else {
+                    await startRecording();
+                  }
+                } catch (err) {
+                  console.error('Recording error:', err);
+                }
+              }}
+              disabled={!canRecord && !isRecording}
+              className={`p-4 rounded-full transition-all flex-shrink-0 ${
+                isRecording
+                  ? 'bg-red-500 scale-110 animate-pulse'
+                  : canRecord
+                  ? 'bg-white/20 hover:bg-white/30 backdrop-blur-sm'
+                  : 'bg-white/10 opacity-50 cursor-not-allowed'
+              } text-white`}
+              title={isRecording ? '탭하여 녹음 중지' : '탭하여 녹음 시작'}
+            >
+              {isRecording ? (
+                <MicrophoneSlash size={24} weight="bold" />
+              ) : (
+                <Microphone size={24} weight="bold" />
+              )}
+            </button>
+
+            {/* Text input */}
+            <div className="flex-1 flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-sm rounded-full border border-white/20">
+              {isProcessing || isListening ? (
+                <div className="flex-1 flex items-center gap-2 text-white/70">
+                  <Spinner size={18} className="animate-spin" />
+                  <span>{isListening ? '듣는 중...' : '생각 중...'}</span>
+                </div>
+              ) : (
                 <input
                   type="text"
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={isConnected ? '메시지를 입력하세요...' : '연결 후 채팅할 수 있습니다'}
-                  disabled={!isConnected || isProcessing}
-                  className="flex-1 px-4 py-3 bg-gray-800 border border-gray-600 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 disabled:opacity-50"
+                  placeholder={isRecording ? '녹음 중...' : '메시지를 입력하세요...'}
+                  disabled={!canInteract}
+                  className="flex-1 bg-transparent text-white placeholder-white/50 focus:outline-none disabled:opacity-50"
                 />
-                <button
-                  onClick={handleSend}
-                  disabled={!inputText.trim() || !isConnected || isProcessing}
-                  className="p-3 bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-600 disabled:opacity-50 text-white rounded-xl transition-colors"
-                >
-                  <PaperPlaneTilt size={22} weight="bold" />
-                </button>
-              </div>
+              )}
+              <button
+                onClick={handleSend}
+                disabled={!inputText.trim() || !canInteract || isListening}
+                className="p-2 rounded-full bg-cyan-500 hover:bg-cyan-600 disabled:bg-white/20 disabled:opacity-50 text-white transition-colors"
+              >
+                <PaperPlaneTilt size={20} weight="bold" />
+              </button>
             </div>
+          </div>
+
+          {/* Recording hint */}
+          {isRecording && (
+            <p className="text-center text-white/70 text-sm mt-2">
+              녹음 중... 마이크 버튼을 다시 탭하면 전송됩니다
+            </p>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

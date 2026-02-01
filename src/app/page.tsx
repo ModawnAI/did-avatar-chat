@@ -1,5 +1,5 @@
-import { AvatarChat } from '@/components/AvatarChat';
+import { TempleExperience } from '@/components/temple/TempleExperience';
 
 export default function Home() {
-  return <AvatarChat />;
+  return <TempleExperience />;
 }

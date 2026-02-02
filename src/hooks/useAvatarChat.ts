@@ -56,19 +56,19 @@ export function useAvatarChat(options: UseAvatarChatOptions = {}) {
         const res = await fetch('/api/did/agent');
         if (res.ok) {
           const data = await res.json();
-          setAgentInfo(data);
+          // Use our proxied idle video URL to avoid CORS issues with WebGL
+          setAgentInfo({
+            ...data,
+            idleVideo: '/api/did/idle-video',
+          });
         } else {
-          const fallbackIdleVideo = process.env.NEXT_PUBLIC_DID_IDLE_VIDEO;
-          if (fallbackIdleVideo) {
-            setAgentInfo({ id: '', name: '', idleVideo: fallbackIdleVideo });
-          }
+          // Fallback to proxied video
+          setAgentInfo({ id: '', name: '', idleVideo: '/api/did/idle-video' });
         }
       } catch (err) {
         console.warn('[Agent] Failed to fetch agent info:', err);
-        const fallbackIdleVideo = process.env.NEXT_PUBLIC_DID_IDLE_VIDEO;
-        if (fallbackIdleVideo) {
-          setAgentInfo({ id: '', name: '', idleVideo: fallbackIdleVideo });
-        }
+        // Fallback to proxied video
+        setAgentInfo({ id: '', name: '', idleVideo: '/api/did/idle-video' });
       }
     };
     fetchAgentInfo();
